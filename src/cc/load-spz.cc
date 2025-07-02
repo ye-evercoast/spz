@@ -1,7 +1,5 @@
 #include "load-spz.h"
 
-#include <zlib.h>
-
 #ifdef ANDROID
 #include <android/log.h>
 #endif
@@ -127,90 +125,8 @@ bool checkSizes(const PackedGaussians &packed, int32_t numPoints, int32_t shDim,
 
 constexpr uint8_t FlagAntialiased = 0x1;
 
-struct PackedGaussiansHeader {
-  uint32_t magic = 0x5053474e;  // NGSP = Niantic gaussian splat
-  uint32_t version = 2;
-  uint32_t numPoints = 0;
-  uint8_t shDegree = 0;
-  uint8_t fractionalBits = 0;
-  uint8_t flags = 0;
-  uint8_t reserved = 0;
-};
-
-bool decompressGzippedImpl(
-  const uint8_t *compressed, size_t size, int32_t windowSize, std::vector<uint8_t> *out) {
-  std::vector<uint8_t> buffer(8192);
-  z_stream stream = {};
-  stream.next_in = const_cast<Bytef *>(compressed);
-  stream.avail_in = size;
-  if (inflateInit2(&stream, windowSize) != Z_OK) {
-    return false;
-  }
-  out->clear();
-  bool success = false;
-  while (true) {
-    stream.next_out = buffer.data();
-    stream.avail_out = buffer.size();
-    int32_t res = inflate(&stream, Z_NO_FLUSH);
-    if (res != Z_OK && res != Z_STREAM_END) {
-      break;
-    }
-    out->insert(out->end(), buffer.data(), buffer.data() + buffer.size() - stream.avail_out);
-    if (res == Z_STREAM_END) {
-      success = true;
-      break;
-    }
-  }
-  inflateEnd(&stream);
-  return success;
-}
-
-bool decompressGzipped(const uint8_t *compressed, size_t size, std::vector<uint8_t> *out) {
-  // Here 16 means enable automatic gzip header detection; consider switching this to 32 to enable
-  // both automated gzip and zlib header detection.
-  return decompressGzippedImpl(compressed, size, 16 | MAX_WBITS, out);
-}
-
-bool decompressGzipped(const uint8_t *compressed, size_t size, std::string *out) {
-  std::vector<uint8_t> buffer;
-  if (!decompressGzipped(compressed, size, &buffer)) {
-    return false;
-  }
-  out->assign(reinterpret_cast<const char *>(buffer.data()), buffer.size());
-  return true;
-}
-
 }  // namespace
 
-bool compressGzipped(const uint8_t *data, size_t size, std::vector<uint8_t> *out) {
-  std::vector<uint8_t> buffer(8192);
-  z_stream stream = {};
-  if (
-    deflateInit2(&stream, Z_DEFAULT_COMPRESSION, Z_DEFLATED, 16 + MAX_WBITS, 9, Z_DEFAULT_STRATEGY)
-    != Z_OK) {
-    return false;
-  }
-  out->clear();
-  out->reserve(size / 4);
-  stream.next_in = const_cast<Bytef *>(reinterpret_cast<const Bytef *>(data));
-  stream.avail_in = size;
-  bool success = false;
-  while (true) {
-    stream.next_out = buffer.data();
-    stream.avail_out = buffer.size();
-    int32_t res = deflate(&stream, Z_FINISH);
-    if (res != Z_OK && res != Z_STREAM_END) {
-      break;
-    }
-    out->insert(out->end(), buffer.data(), buffer.data() + buffer.size() - stream.avail_out);
-    if (res == Z_STREAM_END) {
-      success = true;
-      break;
-    }
-  }
-  deflateEnd(&stream);
-  return success;
-}
 
 PackedGaussians packGaussians(const GaussianCloud &g, const PackOptions &o) {
   if (!checkSizes(g)) {
@@ -307,13 +223,13 @@ UnpackedGaussian PackedGaussian::unpack(
     }
   } else {
     // Decode 24-bit fixed point coordinates
-    float scale = 1.0 / (1 << fractionalBits);
+    float theScale = 1.0 / (1 << fractionalBits);
     for (size_t i = 0; i < 3; i++) {
       int32_t fixed32 = position[i * 3 + 0];
       fixed32 |= position[i * 3 + 1] << 8;
       fixed32 |= position[i * 3 + 2] << 16;
       fixed32 |= (fixed32 & 0x800000) ? 0xff000000 : 0;  // sign extension
-      result.position[i] = c.flipP[i] * static_cast<float>(fixed32) * scale;
+      result.position[i] = c.flipP[i] * static_cast<float>(fixed32) * theScale;
     }
   }
 
@@ -360,11 +276,11 @@ PackedGaussian PackedGaussians::at(int32_t i) const {
   result.alpha = alphas[i];
 
   int32_t shDim = dimForDegree(shDegree);
-  const auto *sh = &this->sh[i * shDim * 3];
-  for (int32_t j = 0; j < shDim; ++j, sh += 3) {
-    result.shR[j] = sh[0];
-    result.shG[j] = sh[1];
-    result.shB[j] = sh[2];
+  const auto *theSh = &this->sh[i * shDim * 3];
+  for (int32_t j = 0; j < shDim; ++j, theSh += 3) {
+    result.shR[j] = theSh[0];
+    result.shG[j] = theSh[1];
+    result.shB[j] = theSh[2];
   }
   for (int32_t j = shDim; j < 15; ++j) {
     result.shR[j] = 128;
@@ -513,21 +429,24 @@ PackedGaussians deserializePackedGaussians(std::istream &in) {
   return result;
 }
 
-bool saveSpz(const GaussianCloud &g, const PackOptions &o, std::vector<uint8_t> *out) {
-  std::string data;
-  {
-    PackedGaussians packed = packGaussians(g, o);
-    std::stringstream ss;
-    serializePackedGaussians(packed, &ss);
-    data = ss.str();
-  }
-  return compressGzipped(reinterpret_cast<const uint8_t *>(data.data()), data.size(), out);
+bool saveSpzUncompressed(const GaussianCloud &g, const PackOptions &o, std::vector<uint8_t>& out) {
+
+  PackedGaussians packed = packGaussians(g, o);
+  std::stringstream ss;
+  serializePackedGaussians(packed, &ss);
+  std::string ss_str = ss.str();
+
+  out.resize(ss_str.length(), 0);
+  memcpy(&out[0], ss_str.data(), ss_str.length());
+
+  return true;
+
 }
 
 PackedGaussians loadSpzPacked(const uint8_t *data, int32_t size) {
-  std::string decompressed;
-  if (!decompressGzipped(data, size, &decompressed))
-    return {};
+  std::string decompressed(size, '\0');
+  memcpy(&decompressed[0], data, size);
+  
   std::stringstream stream(std::move(decompressed));
   return deserializePackedGaussians(stream);
 }
@@ -549,13 +468,13 @@ PackedGaussians loadSpzPacked(const std::string &filename) {
   return loadSpzPacked(data);
 }
 
-GaussianCloud loadSpz(const std::vector<uint8_t> &data, const UnpackOptions &o) {
+GaussianCloud loadSpzUncompressed(const std::vector<uint8_t> &data, const UnpackOptions &o) {
   return unpackGaussians(loadSpzPacked(data), o);
 }
 
-bool saveSpz(const GaussianCloud &g, const PackOptions &o, const std::string &filename) {
+bool saveSpzUncompressed(const GaussianCloud &g, const PackOptions &o, const std::string &filename) {
   std::vector<uint8_t> data;
-  if (!saveSpz(g, o, &data)) {
+  if (!saveSpzUncompressed(g, o, data)) {
     return false;
   }
   std::ofstream out(filename, std::ios::binary | std::ios::out);
@@ -564,7 +483,7 @@ bool saveSpz(const GaussianCloud &g, const PackOptions &o, const std::string &fi
   return out.good();
 }
 
-GaussianCloud loadSpz(const std::string &filename, const UnpackOptions &o) {
+GaussianCloud loadSpzUncompressed(const std::string &filename, const UnpackOptions &o) {
   std::ifstream in(filename, std::ios::binary | std::ios::ate);
   if (!in.good()) {
     SpzLog("[SPZ ERROR] Unable to open: %s", filename.c_str());
@@ -578,7 +497,7 @@ GaussianCloud loadSpz(const std::string &filename, const UnpackOptions &o) {
     SpzLog("[SPZ ERROR] Unable to load data from: %s", filename.c_str());
     return {};
   }
-  return loadSpz(data, o);
+  return loadSpzUncompressed(data, o);
 }
 
 GaussianCloud loadSplatFromPly(const std::string &filename, const UnpackOptions &o) {
@@ -732,6 +651,148 @@ GaussianCloud loadSplatFromPly(const std::string &filename, const UnpackOptions 
 
   result.convertCoordinates(CoordinateSystem::RDF, o.to);
   return result;
+}
+
+GaussianCloud loadSplatFromPlyData(const uint8_t* stream, size_t stream_size, const UnpackOptions& o)
+{
+    std::string data((const char*)stream, stream_size);
+    std::istringstream in(data);
+
+    if (!in.good()) {
+        SpzLog("[SPZ ERROR] Unable to open data stream");
+        return {};
+    }
+    std::string line;
+    std::getline(in, line);
+    if (line != "ply") {
+        SpzLog("[SPZ ERROR] data stream not a .ply file");
+        return {};
+    }
+    std::getline(in, line);
+    if (line != "format binary_little_endian 1.0") {
+        SpzLog("[SPZ ERROR] binary_little_endian: unsupported .ply format");
+        return {};
+    }
+    std::getline(in, line);
+    if (line.find("element vertex ") != 0) {
+        SpzLog("[SPZ ERROR] element vertex: missing vertex count");
+        return {};
+    }
+    int32_t numPoints = std::stoi(line.substr(std::strlen("element vertex ")));
+    if (numPoints <= 0 || numPoints > 10 * 1024 * 1024) {
+        SpzLog("[SPZ ERROR] point count: invalid vertex count: %d", numPoints);
+        return {};
+    }
+
+    SpzLog("[SPZ] Loading %d points", numPoints);
+    std::unordered_map<std::string, int> fields;  // name -> index
+    for (int32_t i = 0;; i++) {
+        std::getline(in, line);
+        if (line == "end_header")
+            break;
+
+        if (line.find("property float ") != 0) {
+            SpzLog("[SPZ ERROR] unsupported property data type: %s", line.c_str());
+            return {};
+        }
+        std::string name = line.substr(std::strlen("property float "));
+        fields[name] = i;
+    }
+
+    // Returns the index for a given field name, ensuring the name exists.
+    const auto index = [&fields](const std::string& name) {
+        const auto& itr = fields.find(name);
+        if (itr == fields.end()) {
+            SpzLog("[SPZ ERROR] Missing field: %s", name.c_str());
+            return -1;
+        }
+        return itr->second;
+        };
+
+    const std::vector<int> positionIdx = { index("x"), index("y"), index("z") };
+    const std::vector<int> scaleIdx = { index("scale_0"), index("scale_1"), index("scale_2") };
+    const std::vector<int> rotIdx = { index("rot_1"), index("rot_2"), index("rot_3"), index("rot_0") };
+    const std::vector<int> alphaIdx = { index("opacity") };
+    const std::vector<int> colorIdx = { index("f_dc_0"), index("f_dc_1"), index("f_dc_2") };
+
+    // Check that only valid indices were returned.
+    for (auto idx : positionIdx) {
+        if (idx < 0) {
+            return {};
+        }
+    }
+    for (auto idx : scaleIdx) {
+        if (idx < 0) {
+            return {};
+        }
+    }
+    for (auto idx : rotIdx) {
+        if (idx < 0) {
+            return {};
+        }
+    }
+    for (auto idx : alphaIdx) {
+        if (idx < 0) {
+            return {};
+        }
+    }
+    for (auto idx : colorIdx) {
+        if (idx < 0) {
+            return {};
+        }
+    }
+
+    // Spherical harmonics are optional and variable in size (depending on degree)
+    std::vector<int> shIdx;
+    for (int32_t i = 0; i < 45; i++) {
+        const auto& itr = fields.find("f_rest_" + std::to_string(i));
+        if (itr == fields.end())
+            break;
+        shIdx.push_back(itr->second);
+    }
+    const int32_t shDim = static_cast<int>(shIdx.size() / 3);
+
+    std::vector<float> values(numPoints * fields.size());
+    in.read(reinterpret_cast<char*>(values.data()), values.size() * sizeof(float));
+    if (!in.good()) {
+        SpzLog("[SPZ ERROR] Unable to load data from data stream, declared point count and byte length mismatch");
+        return {};
+    }
+
+    GaussianCloud result;
+    result.numPoints = numPoints;
+    result.shDegree = degreeForDim(shDim);
+    result.positions.reserve(numPoints * 3);
+    result.scales.reserve(numPoints * 3);
+    result.rotations.reserve(numPoints * 4);
+    result.alphas.reserve(numPoints * 1);
+    result.colors.reserve(numPoints * 3);
+    for (size_t i = 0; i < values.size(); i += fields.size()) {
+        for (int32_t j = 0; j < positionIdx.size(); j++) {
+            result.positions.push_back(values[i + positionIdx[j]]);
+        }
+        for (int32_t j = 0; j < scaleIdx.size(); j++) {
+            result.scales.push_back(values[i + scaleIdx[j]]);
+        }
+        for (int32_t j = 0; j < rotIdx.size(); j++) {
+            result.rotations.push_back(values[i + rotIdx[j]]);
+        }
+        for (int32_t j = 0; j < alphaIdx.size(); j++) {
+            result.alphas.push_back(values[i + alphaIdx[j]]);
+        }
+        for (int32_t j = 0; j < colorIdx.size(); j++) {
+            result.colors.push_back(values[i + colorIdx[j]]);
+        }
+        // Convert from [N,C,S] to [N,S,C] (where C is color channel, S is SH coeff).
+        for (int32_t j = 0; j < shDim; j++) {
+            result.sh.push_back(values[i + shIdx[j]]);
+            result.sh.push_back(values[i + shIdx[j + shDim]]);
+            result.sh.push_back(values[i + shIdx[j + 2 * shDim]]);
+        }
+    }
+
+    result.convertCoordinates(CoordinateSystem::RDF, o.to);
+    return result;
 }
 
 bool saveSplatToPly(const GaussianCloud &data, const PackOptions &o, const std::string &filename) {

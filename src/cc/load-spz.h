@@ -6,7 +6,28 @@
 
 #include "splat-types.h"
 
+
+#if defined(_WIN32) && defined(LIBSPZ_DLL)
+#ifdef LIBSPZ_EXPORTS
+#define LIBSPZ_API __declspec(dllexport)
+#else
+#define LIBSPZ_API __declspec(dllimport)
+#endif
+#else
+#define LIBSPZ_API
+#endif
+
 namespace spz {
+
+struct PackedGaussiansHeader {
+    uint32_t magic = 0x5053474e;  // NGSP = Niantic gaussian splat
+    uint32_t version = 2;
+    uint32_t numPoints = 0;
+    uint8_t shDegree = 0;
+    uint8_t fractionalBits = 0;
+    uint8_t flags = 0;
+    uint8_t reserved = 0;
+};
 
 // Represents a single inflated gaussian. Each gaussian has 236 bytes. Although the data is easier
 // to intepret in this format, it is not more precise than the packed format, since it was inflated.
@@ -65,33 +86,34 @@ struct UnpackOptions {
   CoordinateSystem to = CoordinateSystem::UNSPECIFIED;
 };
 
-// Saves Gaussian splat in packed format, returning a vector of bytes.
-bool saveSpz(
-  const GaussianCloud &gaussians, const PackOptions &options, std::vector<uint8_t> *output);
+// Saves Gaussian splat in packed format, no zlib compression, returning data in a std::string object.
+LIBSPZ_API bool saveSpzUncompressed(const GaussianCloud &g, const PackOptions &o, std::vector<uint8_t>& out);
 
 // Loads Gaussian splat from a vector of bytes in packed format.
-GaussianCloud loadSpz(const std::vector<uint8_t> &data, const UnpackOptions &options);
+LIBSPZ_API GaussianCloud loadSpzUncompressed(const std::vector<uint8_t> &data, const UnpackOptions &options);
 
 // Loads Gaussian splat from a vector of bytes in packed format.
-PackedGaussians loadSpzPacked(const std::string &filename);
-PackedGaussians loadSpzPacked(const uint8_t *data, int32_t size);
-PackedGaussians loadSpzPacked(const std::vector<uint8_t> &data);
+LIBSPZ_API PackedGaussians loadSpzPacked(const std::string &filename);
+LIBSPZ_API PackedGaussians loadSpzPacked(const uint8_t *data, int32_t size);
+LIBSPZ_API PackedGaussians loadSpzPacked(const std::vector<uint8_t> &data);
 
 // Saves Gaussian splat in packed format to a file
-bool saveSpz(
+LIBSPZ_API bool saveSpz(
   const GaussianCloud &gaussians, const PackOptions &options, const std::string &filename);
 
 // Loads Gaussian splat from a file in packed format
-GaussianCloud loadSpz(const std::string &filename, const UnpackOptions &o);
+LIBSPZ_API GaussianCloud loadSpz(const std::string &filename, const UnpackOptions &o);
 
 // Saves Gaussian splat data in .ply format
-bool saveSplatToPly(
+LIBSPZ_API bool saveSplatToPly(
   const spz::GaussianCloud &gaussians, const PackOptions &options, const std::string &filename);
 
 // Loads Gaussian splat data in .ply format
-GaussianCloud loadSplatFromPly(const std::string &filename, const UnpackOptions &options);
+LIBSPZ_API GaussianCloud loadSplatFromPly(const std::string &filename, const UnpackOptions &options);
 
-void serializePackedGaussians(const PackedGaussians &packed, std::ostream *out);
+// Loads Gaussian splat data from memory in .ply format 
+LIBSPZ_API GaussianCloud loadSplatFromPlyData(const uint8_t* stream, size_t stream_size, const UnpackOptions& options);
 
-bool compressGzipped(const uint8_t *data, size_t size, std::vector<uint8_t> *out);
+LIBSPZ_API void serializePackedGaussians(const PackedGaussians &packed, std::ostream *out);
+
 }  // namespace spz

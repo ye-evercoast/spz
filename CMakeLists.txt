@@ -7,9 +7,6 @@ project(spz
 
 include(GNUInstallDirs)
 
-# zlib is required to build the project
-find_package(ZLIB REQUIRED)
-
 set(spz_sources
   "${CMAKE_CURRENT_SOURCE_DIR}/src/cc/load-spz.cc"
   "${CMAKE_CURRENT_SOURCE_DIR}/src/cc/splat-c-types.cc"
@@ -22,11 +19,12 @@ set(spz_headers
   "${CMAKE_CURRENT_SOURCE_DIR}/src/cc/splat-types.h"
 )
 
-# create the library and configure it
-add_library(spz ${spz_sources})
+# create the dynamic library and configure it
+add_library(spz SHARED ${spz_sources})
 add_library(spz::spz ALIAS spz)
+target_compile_definitions(spz PRIVATE LIBSPZ_EXPORTS LIBSPZ_DLL)
+set_target_properties(spz PROPERTIES OUTPUT_NAME "libspz")
 
-target_link_libraries(spz PRIVATE ZLIB::ZLIB)
 
 target_include_directories(spz
   PUBLIC $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/src/cc>
