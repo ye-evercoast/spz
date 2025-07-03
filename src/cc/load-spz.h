@@ -87,7 +87,7 @@ struct UnpackOptions {
 };
 
 // Saves Gaussian splat in packed format, no zlib compression, returning data in a std::string object.
-LIBSPZ_API bool saveSpzUncompressed(const GaussianCloud &g, const PackOptions &o, std::vector<uint8_t>& out);
+LIBSPZ_API bool saveSpzUncompressed(const GaussianCloud &g, const PackOptions &o, uint8_t** ppOut, size_t* pOutSize);
 
 // Loads Gaussian splat from a vector of bytes in packed format.
 LIBSPZ_API GaussianCloud loadSpzUncompressed(const std::vector<uint8_t> &data, const UnpackOptions &options);
@@ -113,6 +113,10 @@ LIBSPZ_API GaussianCloud loadSplatFromPly(const std::string &filename, const Unp
 
 // Loads Gaussian splat data from memory in .ply format 
 LIBSPZ_API GaussianCloud loadSplatFromPlyData(const uint8_t* stream, size_t stream_size, const UnpackOptions& options);
+
+// Feed in PLY stream and get uncompressed SPZ out. Need this because GaussianCloud struct isn't reliably interpreted across DLL boundary
+// Also memory block pp_out_stream will be allocated using malloc() so use free() accordingly
+LIBSPZ_API bool convertPlyDataToSpzData(const uint8_t* p_in_stream, size_t in_stream_size, const UnpackOptions& unpackOption, uint8_t** pp_out_stream, size_t* p_out_stream_size, const PackOptions& packOption);
 
 LIBSPZ_API void serializePackedGaussians(const PackedGaussians &packed, std::ostream *out);
 

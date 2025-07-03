@@ -429,15 +429,17 @@ PackedGaussians deserializePackedGaussians(std::istream &in) {
   return result;
 }
 
-bool saveSpzUncompressed(const GaussianCloud &g, const PackOptions &o, std::vector<uint8_t>& out) {
+bool saveSpzUncompressed(const GaussianCloud& g, const PackOptions& o, uint8_t** ppOut, size_t* pOutSize) {
 
   PackedGaussians packed = packGaussians(g, o);
   std::stringstream ss;
   serializePackedGaussians(packed, &ss);
   std::string ss_str = ss.str();
 
-  out.resize(ss_str.length(), 0);
-  memcpy(&out[0], ss_str.data(), ss_str.length());
+  size_t outSize = ss_str.length();
+  *ppOut = (uint8_t*)malloc(outSize);
+  *pOutSize = outSize;
+  memcpy(*ppOut, ss_str.data(), outSize);
 
   return true;
 
@@ -473,12 +475,13 @@ GaussianCloud loadSpzUncompressed(const std::vector<uint8_t> &data, const Unpack
 }
 
 bool saveSpzUncompressed(const GaussianCloud &g, const PackOptions &o, const std::string &filename) {
-  std::vector<uint8_t> data;
-  if (!saveSpzUncompressed(g, o, data)) {
+  uint8_t* data;
+  size_t data_size;
+  if (!saveSpzUncompressed(g, o, &data, &data_size)) {
     return false;
   }
   std::ofstream out(filename, std::ios::binary | std::ios::out);
-  out.write(reinterpret_cast<const char *>(data.data()), data.size());
+  out.write(reinterpret_cast<const char *>(data), data_size);
   out.close();
   return out.good();
 }
@@ -883,6 +886,12 @@ bool saveSplatToPly(const GaussianCloud &data, const PackOptions &o, const std::
     return false;
   }
   return true;
+}
+
+bool convertPlyDataToSpzData(const uint8_t* p_in_stream, size_t in_stream_size, const UnpackOptions& unpackOption, uint8_t** pp_out_stream, size_t* p_out_stream_size, const PackOptions& packOption)
+{
+    spz::GaussianCloud splats = spz::loadSplatFromPlyData(p_in_stream, in_stream_size, unpackOption);
+    return spz::saveSpzUncompressed(splats, packOption, pp_out_stream, p_out_stream_size);
 }
 
 }  // namespace spz
