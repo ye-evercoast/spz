@@ -7,6 +7,8 @@ project(spz
 
 include(GNUInstallDirs)
 
+option(BUILD_SHARED_LIBS "Build using shared libraries" ON)
+
 # zlib is required to build the project
 find_package(ZLIB REQUIRED)
 
