@@ -23,7 +23,11 @@ set(spz_headers
 add_library(spz SHARED ${spz_sources})
 add_library(spz::spz ALIAS spz)
 target_compile_definitions(spz PRIVATE LIBSPZ_EXPORTS LIBSPZ_DLL)
-set_target_properties(spz PROPERTIES OUTPUT_NAME "libspz")
+if (WIN32)
+  set_target_properties(spz PROPERTIES OUTPUT_NAME "libspz")
+else()
+  set_target_properties(spz PROPERTIES OUTPUT_NAME "spz")
+endif()
 
 
 target_include_directories(spz
@@ -36,6 +40,10 @@ set_target_properties(spz PROPERTIES
   CXX_STANDARD 17
   CXX_STANDARD_REQUIRED ON
 )
+
+if(ANDROID)
+    target_link_libraries(spz PRIVATE log)
+endif()
 
 # Installation
 
