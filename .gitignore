@@ -1,3 +1,5 @@
 .DS_Store
 build/
 build.android/
+build.ios/
+build.mac/

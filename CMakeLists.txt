@@ -20,7 +20,7 @@ set(spz_headers
 )
 
 # create the dynamic library and configure it
-add_library(spz SHARED ${spz_sources})
+add_library(spz SHARED ${spz_sources} ${spz_headers})
 add_library(spz::spz ALIAS spz)
 target_compile_definitions(spz PRIVATE LIBSPZ_EXPORTS LIBSPZ_DLL)
 if (WIN32)
@@ -43,6 +43,22 @@ set_target_properties(spz PROPERTIES
 
 if(ANDROID)
     target_link_libraries(spz PRIVATE log)
+endif()
+
+if (IOS)
+  set_target_properties(spz PROPERTIES
+      FRAMEWORK TRUE
+      FRAMEWORK_VERSION A
+      XCODE_ATTRIBUTE_INSTALL_PATH "@rpath"
+      PUBLIC_HEADER "${spz_headers}"
+      OUTPUT_NAME "spz"
+      XCODE_ATTRIBUTE_CODE_SIGN_IDENTITY ""
+      XCODE_ATTRIBUTE_CODE_SIGNING_ALLOWED "NO"
+      XCODE_ATTRIBUTE_CODE_SIGNING_REQUIRED "NO"
+      MACOSX_FRAMEWORK_IDENTIFIER com.evercoast.libspz
+      MACOSX_FRAMEWORK_SHORT_VERSION_STRING 1.0
+      MACOSX_FRAMEWORK_BUNDLE_VERSION 1
+  )
 endif()
 
 # Installation
@@ -70,6 +86,7 @@ install(TARGETS spz
   ARCHIVE DESTINATION ${CMAKE_INSTALL_LIBDIR}
   RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR}
   LIBRARY DESTINATION ${CMAKE_INSTALL_LIBDIR}
+  FRAMEWORK DESTINATION Frameworks
   PUBLIC_HEADER DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}
 )
 
